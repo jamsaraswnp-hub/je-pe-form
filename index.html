@@ -209,6 +209,7 @@ async function submit(data, btnFoot) {
   const btn = btnFoot.querySelector('.cta'), old = btn.textContent;
   btn.disabled = true; btn.textContent = 'กำลังส่งให้เจ๊…';
   try {
+    await READY_P; // เปิดจากรายชื่อที่จำไว้: รอ LINE ยืนยันตัวตนให้เสร็จก่อนส่ง
     const r = await api({ action: 'draft', data });
     if (!r.ok) throw new Error(r.error);
     let sent = false;
@@ -485,8 +486,25 @@ function readParams() {
   sp.forEach((v, k) => { if (k !== 'liff.state') out[k] = v; });
   return out;
 }
+/* จำข้อมูลฟอร์มไว้ในเครื่อง: ครั้งหน้าเปิดปุ๊บขึ้นปั๊บ แล้วค่อยเช็กกับเจ๊เบื้องหลัง */
+let READY; const READY_P = new Promise(r => { READY = r; });
+let touched = false;
+document.addEventListener('input', () => { touched = true; }, true);
+document.addEventListener('click', e => { if (e.target.closest && e.target.closest('.body,.foot')) touched = true; }, true);
+function cacheKey() { return 'jepe:' + Q.g + ':' + Q.f; }
+function loadCache() {
+  try { const c = JSON.parse(localStorage.getItem(cacheKey()) || 'null'); return c && Date.now() - c.at < 7 * 864e5 ? c.d : null; } catch (e) { return null; }
+}
+function saveCache(d) { try { localStorage.setItem(cacheKey(), JSON.stringify({ at: Date.now(), d })); } catch (e) { /* เครื่องไม่ให้เก็บ */ } }
+function validQ() {
+  return /^(split|items|regular|shared)$/.test(Q.f) && /^C[0-9a-f]{32}$/.test(Q.g) && /^[0-9a-f]{24}$/.test(Q.s) && /^[A-Za-z0-9_-]{10,120}$/.test(Q.a);
+}
+function render() { touched = false; ({ split: formSplit, items: formItems, regular: formRegular, shared: formShared })[Q.f](); }
 async function main() {
   const first = readParams();
+  ['f', 'g', 's', 'a'].forEach(k => Q[k] = first[k] || '');
+  const cached = validQ() ? loadCache() : null;
+  if (cached) { D = cached; render(); }
   const liffId = /^\d{6,}-\w{4,}$/.test(first.l || '') ? first.l : LIFF_ID;
   try {
     await liff.init({ liffId });
@@ -494,19 +512,23 @@ async function main() {
   if (!liff.isLoggedIn()) return liff.login({ redirectUri: location.href });
   const p = Object.assign({}, first, readParams());
   ['f', 'g', 's', 'a'].forEach(k => Q[k] = p[k] || '');
-  if (!/^(split|items|regular|shared)$/.test(Q.f) || !/^C[0-9a-f]{32}$/.test(Q.g) || !/^[0-9a-f]{24}$/.test(Q.s) || !/^[A-Za-z0-9_-]{10,120}$/.test(Q.a)) {
-    return fail('เปิดฟอร์มจากปุ่มเมนูในกลุ่มนะคะ (พิมพ์ "เจ๊" ในกลุ่ม)');
-  }
+  if (!validQ()) return fail('เปิดฟอร์มจากปุ่มเมนูในกลุ่มนะคะ (พิมพ์ "เจ๊" ในกลุ่ม)');
   ID_TOKEN = liff.getIDToken() || '';
   if (!ID_TOKEN) return fail('ฟอร์มยังไม่ได้รับสิทธิ์ยืนยันตัวตน ลองปิดแล้วเปิดใหม่นะคะ');
+  READY();
   let r;
-  try { r = await api({ action: 'init', f: Q.f }); } catch (e) { return fail('ต่อหาเจ๊ไม่ได้ เน็ตอาจหลุด ลองใหม่อีกทีนะคะ'); }
+  try { r = await api({ action: 'init', f: Q.f }); } catch (e) {
+    if (cached) return toast('เน็ตช้านิดนึง เจ๊ใช้รายชื่อที่จำไว้ให้ก่อนนะคะ');
+    return fail('ต่อหาเจ๊ไม่ได้ เน็ตอาจหลุด ลองใหม่อีกทีนะคะ');
+  }
   if (!r.ok) {
     if (r.relogin && !liff.isInClient()) { liff.logout(); return liff.login({ redirectUri: location.href }); }
     return fail(r.error);
   }
+  saveCache(r);
+  const changed = !cached || JSON.stringify(cached) !== JSON.stringify(r);
   D = r;
-  ({ split: formSplit, items: formItems, regular: formRegular, shared: formShared })[Q.f]();
+  if (!cached || (changed && !touched)) render();
 }
 main();
 </script>
