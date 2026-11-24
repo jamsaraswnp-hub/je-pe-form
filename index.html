@@ -111,7 +111,7 @@ function h(tag, attrs, ...kids) {
 function baht(v) { return '฿' + (Math.round(v * 100) / 100).toLocaleString('th-TH', { maximumFractionDigits: 2 }); }
 function num(s) { const n = parseFloat(String(s || '').replace(/[,\s฿]/g, '')); return n > 0 ? n : 0; }
 function ceil2(v) { return Math.ceil(Math.round(v * 1e6) / 1e4) / 100; } // ปัดขึ้นเป็นสตางค์ เหมือนเจ๊
-function nameOf(id) { if (id === 'me') return 'เรา'; const m = D.members.find(x => x.id === id); return m ? m.name : 'เพื่อน'; }
+function nameOf(id) { if (id === 'me') return 'ตัวฉัน'; const m = D.members.find(x => x.id === id); return m ? m.name : 'เพื่อน'; }
 function colorOf(id) { let s = 0; for (const c of id) s = (s * 31 + c.charCodeAt(0)) >>> 0; return COLORS[s % COLORS.length]; }
 function initial(name) { const ch = Array.from(String(name).replace(/^[เแโใไ]/, '')); return ch[0] || '?'; }
 let toastT;
@@ -223,19 +223,27 @@ async function submit(data, btnFoot) {
   } finally { sending = false; }
 }
 
+/* ---------- โหมดแก้ไข: ข้อมูลเดิมจากเจ๊ ---------- */
+function editOf(type) { return D && D.edit && D.edit.type === type ? D.edit : null; }
+function knownIds(list) { return (list || []).filter(id => D.members.some(m => m.id === id)); }
+
 /* ---------- ฟอร์ม: หารเท่ากัน ---------- */
 let refresh = () => {};
 function formSplit() {
-  const S = { title: '', amount: '', mode: 'total', owner: true, ids: new Set(), due: D.defaultDue };
+  const E = editOf('bill'), P = E ? E.prefill : null;
+  const S = P ? { title: P.title || '', amount: P.amount || '', mode: P.mode === 'each' ? 'each' : 'total', owner: P.owner !== false,
+    ids: new Set(knownIds(P.ids)), due: [1, 3, 7, 14].includes(+P.due) ? +P.due : D.defaultDue }
+    : { title: '', amount: '', mode: 'total', owner: true, ids: new Set(), due: D.defaultDue };
   const pill = h('div', { class: 'pill' });
   function paintPill() {
     pill.replaceChildren(...[['total', 'ยอดรวม'], ['each', 'ต่อคน']].map(([v, l]) =>
       h('button', { type: 'button', class: S.mode === v ? 'on' : '', onclick: () => { S.mode = v; paintPill(); refresh(); } }, l)));
   }
   paintPill();
-  const owner = switchRow('เราหารด้วย', () => S.mode === 'each' ? 'โหมดต่อคน: เจ๊เก็บเฉพาะเพื่อนที่เลือก' :
-    S.owner ? 'นับเราเป็น 1 ส่วน (เราไม่ต้องโอนให้ตัวเอง)' : 'เราออกให้ หารเฉพาะเพื่อน', () => S.owner, v => S.owner = v);
-  const foot = footer('ส่งให้เจ๊เปิดบิล', () => submit({ kind: 'split', title: S.title, amount: S.amount, perMode: S.mode, owner: S.owner, ids: [...S.ids], dueDays: S.due }, foot));
+  const owner = switchRow('นับตัวฉันด้วย', () => S.mode === 'each' ? 'โหมดต่อคน: เจ๊เก็บเฉพาะเพื่อนที่เลือก' :
+    S.owner ? 'นับตัวฉันเป็น 1 ส่วน (ตัวฉันไม่ต้องโอนให้ตัวเอง)' : 'ไม่นับตัวฉัน ตัวฉันออกให้ หารเฉพาะเพื่อน', () => S.owner, v => S.owner = v);
+  const foot = footer(E ? 'ส่งให้เจ๊แก้บิล' : 'ส่งให้เจ๊เปิดบิล', () => submit({ kind: 'split', title: S.title, amount: S.amount, perMode: S.mode, owner: S.owner, ids: [...S.ids], dueDays: S.due,
+    edit: E ? { bill: E.id } : undefined }, foot));
   refresh = () => {
     owner.refresh();
     const n = S.ids.size, amt = num(S.amount), heads = n + (S.mode === 'total' && S.owner ? 1 : 0);
@@ -244,10 +252,11 @@ function formSplit() {
     if (!n) return foot.set('เลือกเพื่อนที่ต้องจ่ายก่อนน้า', '–', false);
     foot.set(S.mode === 'total' ? 'หาร ' + heads + ' ส่วน · เก็บเพื่อน ' + n + ' คน · คนละ' : 'เก็บเพื่อน ' + n + ' คน · รวม ' + baht(per * n) + ' · คนละ', amt ? baht(per) : '–', ok);
   };
-  setApp(header('เปิดบิลใหม่', 'หารเท่ากัน', 'กรอกแค่ยอด แล้วเลือกเพื่อน เจ๊คิดที่เหลือเองค่ะ', D.sticker.smile),
+  setApp(E ? header('แก้บิล', E.title, 'ยอดเดิม ' + baht(E.oldTotal / 100) + ' · แก้แล้วเจ๊ส่งบิลใหม่ + QR ใหม่ให้', D.sticker.smile)
+      : header('เปิดบิลใหม่', 'หารเท่ากัน', 'กรอกแค่ยอด แล้วเลือกเพื่อน เจ๊คิดที่เหลือเองค่ะ', D.sticker.smile),
     h('div', { class: 'body' }, payWarn(),
-      textField('ค่าอะไร', '', 'เช่น หมูกระทะ', v => { S.title = v; }),
-      moneyField('จำนวนเงิน', '', v => { S.amount = v; refresh(); }, pill),
+      textField('ค่าอะไร', S.title, 'เช่น หมูกระทะ', v => { S.title = v; }),
+      moneyField('จำนวนเงิน', S.amount, v => { S.amount = v; refresh(); }, pill),
       peopleBlock('ใครต้องจ่าย', D.members, S.ids, () => refresh()),
       owner,
       h('div', { class: 'field', style: 'gap:8px' }, h('div', { class: 'lbl' }, 'จ่ายภายใน'),
@@ -258,13 +267,20 @@ function formSplit() {
 
 /* ---------- ฟอร์ม: แยกตามเมนู ---------- */
 function formItems() {
+  const E = editOf('bill'), P = E ? E.prefill : null;
   const S = { title: '', people: new Set(), items: [{ name: '', price: '', who: new Set() }], sc: false, vat: false };
+  if (P) {
+    S.title = P.title || ''; S.people = new Set(knownIds(P.people)); S.sc = !!P.service; S.vat = !!P.vat;
+    const items = (P.items || []).map(it => ({ name: it.name || '', price: it.price || '',
+      who: new Set((it.who || []).filter(k => k === 'me' || k === 'all' || S.people.has(k))) }));
+    if (items.length) S.items = items;
+  }
   const list = h('div', { style: 'display:flex;flex-direction:column;gap:8px' });
   const summary = h('div', { class: 'box' });
   function chipsFor(it) {
     const box = h('div', { class: 'wrap' });
     function paint() {
-      const opts = [['me', 'เรา']].concat([...S.people].map(id => [id, nameOf(id)])).concat([['all', 'ทุกคน']]);
+      const opts = [['me', 'ตัวฉัน']].concat([...S.people].map(id => [id, nameOf(id)])).concat([['all', 'ทุกคน']]);
       box.replaceChildren(...opts.map(([k, l]) => {
         const on = it.who.has(k);
         return h('button', { type: 'button', class: 'chip sm' + (k === 'all' ? ' all' : '') + (on ? ' on' : ''), 'aria-pressed': on ? 'true' : 'false',
@@ -300,8 +316,8 @@ function formItems() {
       h('button', { type: 'button', class: 'opt' + (S.vat ? ' on' : ''), 'aria-pressed': S.vat ? 'true' : 'false', onclick: () => { S.vat = !S.vat; paintCharges(); refresh(); } }, 'VAT 7%'));
   }
   paintCharges();
-  const foot = footer('ส่งให้เจ๊เปิดบิล + QR รายคน', () => submit({ kind: 'items', title: S.title, people: [...S.people], service: S.sc, vat: S.vat,
-    items: S.items.map(it => ({ name: it.name, price: it.price, who: [...it.who] })) }, foot));
+  const foot = footer(E ? 'ส่งให้เจ๊แก้บิล' : 'ส่งให้เจ๊เปิดบิล + QR รายคน', () => submit({ kind: 'items', title: S.title, people: [...S.people], service: S.sc, vat: S.vat,
+    items: S.items.map(it => ({ name: it.name, price: it.price, who: [...it.who] })), edit: E ? { bill: E.id } : undefined }, foot));
   refresh = () => {
     const sub = { me: 0 }; [...S.people].forEach(id => sub[id] = 0);
     const keys = Object.keys(sub);
@@ -317,18 +333,19 @@ function formItems() {
     let total = 0, collect = 0;
     const rows = keys.filter(k => k !== 'me' || ownerUsed).map(k => {
       const a = ceil2(sub[k] * f); total += a; if (k !== 'me') collect += a;
-      return h('div', { class: 'r' }, h('span', {}, nameOf(k), k === 'me' ? h('small', { class: 'hint' }, ' (ส่วนของเรา ไม่ต้องโอน)') : ''),
+      return h('div', { class: 'r' }, h('span', {}, nameOf(k), k === 'me' ? h('small', { class: 'hint' }, ' (ส่วนของตัวฉัน ไม่ต้องโอน)') : ''),
         h('b', { style: 'color:' + (k === 'me' ? 'var(--gray)' : 'var(--red)') }, baht(a)));
     });
     summary.replaceChildren(h('div', { style: 'font-size:13px;font-weight:600' }, 'เจ๊คิดให้แล้ว'), ...rows,
-      h('div', { class: 'hint' }, '"ทุกคน" = หารเท่ากันทุกคนในบิลรวมเรา · เศษสตางค์เจ๊ปัดขึ้นให้'));
+      h('div', { class: 'hint' }, '"ทุกคน" = หารเท่ากันทุกคนในบิล รวมตัวฉันด้วย · เศษสตางค์เจ๊ปัดขึ้นให้'));
     const ok = S.people.size > 0 && collect > 0 && !missing && D.hasPayment;
     foot.set(missing ? 'มีเมนูที่ยังไม่ได้เลือกคนกินน้า' : 'รวมทั้งบิล ' + baht(total) + ' · เก็บเพื่อน', missing ? '–' : baht(collect), ok);
   };
   paintItems();
-  setApp(header('เปิดบิลใหม่', 'แยกตามเมนู', 'เลือกคนในบิล ใส่เมนู แล้วแตะคนที่กินจานนั้น', D.sticker.points),
+  setApp(E ? header('แก้บิล', E.title, 'ยอดเดิม ' + baht(E.oldTotal / 100) + ' · แก้แล้วเจ๊ส่งบิลใหม่ + QR ใหม่ให้', D.sticker.points)
+      : header('เปิดบิลใหม่', 'แยกตามเมนู', 'เลือกคนในบิล ใส่เมนู แล้วแตะคนที่กินจานนั้น', D.sticker.points),
     h('div', { class: 'body' }, payWarn(),
-      textField('ชื่อบิล', '', 'เช่น ข้าวเย็น', v => { S.title = v; }),
+      textField('ชื่อบิล', S.title, 'เช่น ข้าวเย็น', v => { S.title = v; }),
       peopleUi,
       h('div', { class: 'field', style: 'gap:8px' }, h('div', { class: 'lbl' }, 'รายการอาหาร'), list,
         h('button', { type: 'button', class: 'add', onclick: () => { S.items.push({ name: '', price: '', who: new Set() }); paintItems(); refresh(); } }, '+ เพิ่มเมนู')),
@@ -340,7 +357,10 @@ function formItems() {
 /* ---------- ฟอร์ม: รายเดือน / ผ่อน ---------- */
 function formRegular() {
   const today = D.today, todayDay = +today.slice(8, 10);
-  const S = { mode: 'monthly', title: '', amount: '', n: 6, day: 1, owner: true, ids: new Set() };
+  const E = editOf('rec'), P = E ? E.prefill : null;
+  const S = P ? { mode: P.mode === 'inst' ? 'inst' : 'monthly', title: P.title || '', amount: P.amount || '', n: Math.max(2, Math.min(60, +P.n || 6)),
+    day: Math.max(1, Math.min(31, +P.day || 1)), owner: P.owner !== false, ids: new Set(knownIds(P.ids)) }
+    : { mode: 'monthly', title: '', amount: '', n: 6, day: 1, owner: true, ids: new Set() };
   const M = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'];
   function dateOf(y, m, d) { const last = new Date(Date.UTC(y, m + 1, 0)).getUTCDate(); return { y, m, d: Math.min(d, last) }; }
   function fmtD(o) { return o.d + ' ' + M[o.m] + ' ' + String(o.y + 543).slice(2); }
@@ -364,9 +384,10 @@ function formRegular() {
   const sel = h('select', { class: 'txt', style: 'height:40px;font-size:14px', 'aria-label': 'เลือกวันอื่น', onchange: e => { S.day = +e.target.value; days.paint(); refresh(); } },
     ...Array.from({ length: 31 }, (_, i) => h('option', { value: i + 1 }, i + 1 === 31 ? 'ทุกสิ้นเดือน' : 'วันที่ ' + (i + 1))));
   sel.value = S.day;
-  const owner = switchRow('เราหารด้วย', () => S.owner ? 'หาร ' + (S.ids.size + 1) + ' ส่วน รวมเราด้วย' : 'เราออกส่วนนี้ให้ หารเฉพาะเพื่อน', () => S.owner, v => S.owner = v);
+  const owner = switchRow('นับตัวฉันด้วย', () => S.owner ? 'หาร ' + (S.ids.size + 1) + ' ส่วน รวมตัวฉันด้วย' : 'ไม่นับตัวฉัน ตัวฉันออกส่วนนี้ให้ หารเฉพาะเพื่อน', () => S.owner, v => S.owner = v);
   const preview = h('div', {});
-  const foot = footer('ตั้งให้เจ๊เก็บประจำ', () => submit({ kind: S.mode === 'inst' ? 'inst' : 'monthly', title: S.title, amount: S.amount, day: S.day, n: S.n, owner: S.owner, ids: [...S.ids] }, foot));
+  const foot = footer(E ? 'บันทึกการแก้ไข' : 'ตั้งให้เจ๊เก็บประจำ', () => submit({ kind: S.mode === 'inst' ? 'inst' : 'monthly', title: S.title, amount: S.amount, day: S.day, n: S.n, owner: S.owner, ids: [...S.ids],
+    edit: E ? { rec: E.id } : undefined }, foot));
   function paintSeg() {
     seg.replaceChildren(...[['monthly', 'รายเดือน'], ['inst', 'ผ่อนเป็นงวด']].map(([v, l]) =>
       h('button', { type: 'button', class: S.mode === v ? 'on' : '', 'aria-pressed': S.mode === v ? 'true' : 'false', onclick: () => { S.mode = v; paintSeg(); refresh(); } }, l)));
@@ -388,10 +409,11 @@ function formRegular() {
     if (!n) return foot.set('เลือกเพื่อนที่ต้องจ่ายก่อนน้า', '–', false);
     foot.set('เก็บเพื่อน ' + n + ' คน · คนละ' + (inst ? 'ต่องวด' : 'ต่อเดือน'), amt ? baht(per) : '–', amt > 0 && D.hasPayment);
   };
-  setApp(header('เก็บประจำ', 'รายเดือน / ผ่อน', 'ตั้งครั้งเดียว เจ๊เปิดบิลให้เองทุกเดือน', D.sticker.smile),
-    h('div', { class: 'body' }, payWarn(), seg, modeHint,
-      textField('ค่าอะไร', '', 'เช่น Netflix หรือ ทีวี', v => { S.title = v; }),
-      h('div', { style: 'display:flex;flex-direction:column;gap:12px' }, moneyField(amountLabel, '', v => { S.amount = v; refresh(); }), stepRow),
+  setApp(E ? header(S.mode === 'inst' ? 'แก้ผ่อน' : 'แก้รายเดือน', E.title, S.mode === 'inst' ? 'ยังไม่เริ่มเก็บ แก้ได้ทุกอย่างค่ะ' : 'มีผลตั้งแต่รอบหน้า บิลที่เปิดไปแล้วยังเป็นยอดเดิม', D.sticker.smile)
+      : header('เก็บประจำ', 'รายเดือน / ผ่อน', 'ตั้งครั้งเดียว เจ๊เปิดบิลให้เองทุกเดือน', D.sticker.smile),
+    h('div', { class: 'body' }, payWarn(), E ? null : seg, modeHint,
+      textField('ค่าอะไร', S.title, 'เช่น Netflix หรือ ทีวี', v => { S.title = v; }),
+      h('div', { style: 'display:flex;flex-direction:column;gap:12px' }, moneyField(amountLabel, S.amount, v => { S.amount = v; refresh(); }), stepRow),
       h('div', { class: 'field', style: 'gap:8px' }, h('div', { class: 'lbl' }, 'เก็บทุกวันที่'), days, sel),
       peopleBlock('ใครต้องจ่าย', D.members, S.ids, () => refresh()), owner, preview),
     foot);
@@ -461,14 +483,14 @@ function formShared() {
       }
       const diff = v[1] - v[0];
       netBox.replaceChildren(h('div', { class: 'box', style: 'background:#fff;border:1px solid var(--line)' },
-        h('div', { class: 'r' }, h('span', {}, 'เราค้าง' + nm), h('b', { style: 'color:var(--red)' }, baht(v[0] / 100))),
-        h('div', { class: 'r' }, h('span', {}, nm + 'ค้างเรา'), h('b', { style: 'color:var(--green)' }, baht(v[1] / 100))),
+        h('div', { class: 'r' }, h('span', {}, 'ตัวฉันค้าง' + nm), h('b', { style: 'color:var(--red)' }, baht(v[0] / 100))),
+        h('div', { class: 'r' }, h('span', {}, nm + 'ค้างตัวฉัน'), h('b', { style: 'color:var(--green)' }, baht(v[1] / 100))),
         h('div', { style: 'height:1px;background:var(--line)' }),
-        h('div', { class: 'r', style: 'font-weight:700' }, h('span', {}, diff > 0 ? nm + 'โอนให้เรา' : diff < 0 ? 'เราโอนให้' + nm : 'หักกันพอดี ไม่ต้องโอน'), h('span', {}, baht(Math.abs(diff) / 100)))),
+        h('div', { class: 'r', style: 'font-weight:700' }, h('span', {}, diff > 0 ? nm + 'โอนให้ตัวฉัน' : diff < 0 ? 'ตัวฉันโอนให้' + nm : 'หักกันพอดี ไม่ต้องโอน'), h('span', {}, baht(Math.abs(diff) / 100)))),
         h('div', { class: 'hint', style: 'margin-top:8px' }, 'กดส่งแล้ว เจ๊จะให้' + nm + 'กดยืนยันในกลุ่มก่อน บิลเก่าถึงจะปิดให้'));
       return foot.set('เหลือโอนครั้งเดียว', baht(Math.abs(diff) / 100), true, 'ส่งให้' + nm + 'กดยืนยัน');
     }
-    if (!T) return foot.set(S.tripIds.size ? 'ไปด้วยกัน ' + (S.tripIds.size + 1) + ' คน (รวมเรา)' : 'เลือกเพื่อนที่ไปด้วยก่อนน้า', '', S.tripIds.size > 0, 'เปิดสมุดทริป');
+    if (!T) return foot.set(S.tripIds.size ? 'ไปด้วยกัน ' + (S.tripIds.size + 1) + ' คน (รวมตัวฉัน)' : 'เลือกเพื่อนที่ไปด้วยก่อนน้า', '', S.tripIds.size > 0, 'เปิดสมุดทริป');
     const k = S.share.size, amt = num(S.amount);
     foot.set(k ? 'หาร ' + k + ' คน · คนละ' : 'เลือกคนหารก่อนน้า', k && amt ? baht(ceil2(amt / k)) : '–', k > 0 && amt > 0, 'จดลงสมุดทริป');
   };
@@ -492,18 +514,20 @@ let touched = false;
 document.addEventListener('input', () => { touched = true; }, true);
 document.addEventListener('click', e => { if (e.target.closest && e.target.closest('.body,.foot')) touched = true; }, true);
 function cacheKey() { return 'jepe:' + Q.g + ':' + Q.f; }
+function editing() { return !!(Q.e || Q.r); }
 function loadCache() {
   try { const c = JSON.parse(localStorage.getItem(cacheKey()) || 'null'); return c && Date.now() - c.at < 7 * 864e5 ? c.d : null; } catch (e) { return null; }
 }
 function saveCache(d) { try { localStorage.setItem(cacheKey(), JSON.stringify({ at: Date.now(), d })); } catch (e) { /* เครื่องไม่ให้เก็บ */ } }
 function validQ() {
-  return /^(split|items|regular|shared)$/.test(Q.f) && /^C[0-9a-f]{32}$/.test(Q.g) && /^[0-9a-f]{24}$/.test(Q.s) && /^[A-Za-z0-9_-]{10,120}$/.test(Q.a);
+  return /^(split|items|regular|shared)$/.test(Q.f) && /^C[0-9a-f]{32}$/.test(Q.g) && /^[0-9a-f]{24}$/.test(Q.s) && /^[A-Za-z0-9_-]{10,120}$/.test(Q.a) &&
+    (!Q.e || /^[A-Za-z0-9-]{4,40}$/.test(Q.e)) && (!Q.r || /^[A-Za-z0-9-]{4,40}$/.test(Q.r));
 }
 function render() { touched = false; ({ split: formSplit, items: formItems, regular: formRegular, shared: formShared })[Q.f](); }
 async function main() {
   const first = readParams();
-  ['f', 'g', 's', 'a'].forEach(k => Q[k] = first[k] || '');
-  const cached = validQ() ? loadCache() : null;
+  ['f', 'g', 's', 'a', 'e', 'r'].forEach(k => Q[k] = first[k] || '');
+  const cached = validQ() && !editing() ? loadCache() : null; // แก้บิล: ต้องใช้ข้อมูลสดจากเจ๊เท่านั้น
   if (cached) { D = cached; render(); }
   const liffId = /^\d{6,}-\w{4,}$/.test(first.l || '') ? first.l : LIFF_ID;
   try {
@@ -511,13 +535,13 @@ async function main() {
   } catch (e) { return fail('LINE เปิดฟอร์มไม่สำเร็จ ลองปิดแล้วกดเมนูใหม่อีกทีนะคะ'); }
   if (!liff.isLoggedIn()) return liff.login({ redirectUri: location.href });
   const p = Object.assign({}, first, readParams());
-  ['f', 'g', 's', 'a'].forEach(k => Q[k] = p[k] || '');
+  ['f', 'g', 's', 'a', 'e', 'r'].forEach(k => Q[k] = p[k] || '');
   if (!validQ()) return fail('เปิดฟอร์มจากปุ่มเมนูในกลุ่มนะคะ (พิมพ์ "เจ๊" ในกลุ่ม)');
   ID_TOKEN = liff.getIDToken() || '';
   if (!ID_TOKEN) return fail('ฟอร์มยังไม่ได้รับสิทธิ์ยืนยันตัวตน ลองปิดแล้วเปิดใหม่นะคะ');
   READY();
   let r;
-  try { r = await api({ action: 'init', f: Q.f }); } catch (e) {
+  try { r = await api({ action: 'init', f: Q.f, e: Q.e || undefined, r: Q.r || undefined }); } catch (e) {
     if (cached) return toast('เน็ตช้านิดนึง เจ๊ใช้รายชื่อที่จำไว้ให้ก่อนนะคะ');
     return fail('ต่อหาเจ๊ไม่ได้ เน็ตอาจหลุด ลองใหม่อีกทีนะคะ');
   }
@@ -525,7 +549,7 @@ async function main() {
     if (r.relogin && !liff.isInClient()) { liff.logout(); return liff.login({ redirectUri: location.href }); }
     return fail(r.error);
   }
-  saveCache(r);
+  if (!editing()) saveCache(r);
   const changed = !cached || JSON.stringify(cached) !== JSON.stringify(r);
   D = r;
   if (!cached || (changed && !touched)) render();
